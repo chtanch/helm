@@ -36,6 +36,11 @@ def register_huggingface_model(
         max_sequence_length = tokenizer.model_max_length
         end_of_text_token = tokenizer.eos_token or ""
         prefix_token = tokenizer.bos_token or ""
+
+    # for local HF models that did not specify model length, set an arbitrary length
+    if max_sequence_length > 1_000_000 and os.path.isdir(pretrained_model_name_or_path):
+        max_sequence_length = 4096
+        
     # If the tokenizer config has a model_max_length of 1000000000000000019884624838656
     # it means that model creator did not specify model_max_length.
     if max_sequence_length > 1_000_000:

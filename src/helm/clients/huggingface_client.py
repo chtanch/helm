@@ -1,5 +1,7 @@
+import os
 from copy import deepcopy
 import torch
+from transformers import is_torch_xpu_available
 from transformers import AutoModelForCausalLM
 from transformers.generation.stopping_criteria import (
     StoppingCriteria,
@@ -20,7 +22,6 @@ from helm.common.request import (
 from .client import CachingClient, truncate_sequence
 from helm.tokenizers.huggingface_tokenizer import HuggingFaceTokenizer, WrappedPreTrainedTokenizer
 from threading import Lock
-
 
 class StopAtSpecificTokenCriteria(StoppingCriteria):
     def __init__(self, stop_sequence: List[int]):
@@ -54,14 +55,39 @@ class HuggingFaceServer:
     """A thin wrapper around a Hugging Face AutoModelForCausalLM for HuggingFaceClient to call."""
 
     def __init__(self, pretrained_model_name_or_path: str, openvino=False, **kwargs):
-        if torch.cuda.is_available():
-            hlog("CUDA is available, initializing with a GPU...")
-            self.device: str = "cuda:0"
+        if is_torch_xpu_available():
+            hlog("XPU is available, using XPU")
+            self.device: str = "xpu:0"
+        # elif torch.cuda.is_available():
+        #     hlog("CUDA is available, initializing with a GPU...")
+        #     self.device: str = "cuda:0"
         else:
             self.device = "cpu"
         with htrack_block(f"Loading Hugging Face model {pretrained_model_name_or_path}"):
+            if int(os.getenv('HELM_IPEX_LLM', '0')):
+                import ipex_llm.transformers
+
+                model_kwargs = {
+                    "optimize_model": True,
+                    "load_in_low_bit": os.getenv('HELM_IPEX_LLM_LOAD_IN_LOW_BIT', 'sym_int4'),
+                    "trust_remote_code": True,
+                    "use_cache": True,
+                    "cpu_embedding": True if int(os.getenv('HELM_IPEX_LLM_CPU_EMBEDDING', '0')) else False,
+                }
+                print("ipex_llm.transformers.AutoModelForCausalLM model kwargs...")
+                for key, value in model_kwargs.items():
+                    print(key, value)
+
+                self.model = ipex_llm.transformers.AutoModelForCausalLM.from_pretrained(
+                    pretrained_model_name_or_path,
+                    **model_kwargs,
+                ).eval()
+
+                self.model = self.model.half()
+                self.model = self.model.to(self.device)
+
             # WARNING this may fail if your GPU does not have enough memory
-            if openvino:
+            elif openvino:
                 """
                 Optimum Intel provides a simple interface to optimize Transformer models and convert them to \
                 OpenVINO™ Intermediate Representation (IR) format to accelerate end-to-end pipelines on \
