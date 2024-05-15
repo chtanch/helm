@@ -561,6 +561,14 @@ model_deployments:
 
   # HuggingFace
 
+  ## AdaptLLM
+  - name: huggingface/law-chat
+    model_name: AdaptLLM/law-chat
+    tokenizer_name: adaptllm/law-chat
+    max_sequence_length: 4094 # Subtract 2 tokens to work around a off-by-two bug in Together's token counting (#2080 and #2094)
+    client_spec:
+      class_name: "helm.clients.huggingface_client.HuggingFaceClient"
+
   ## Bigcode
   - name: huggingface/santacoder
     model_name: bigcode/santacoder
